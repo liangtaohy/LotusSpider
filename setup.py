@@ -1,9 +1,10 @@
+#-*-coding:utf8-*-
 from setuptools import setup
 
 setup(
-    name='lotus-useragent',
+    name='lotus-spider',
     version='1.0.0',
-    description='Use a random User-Agent for every request',
+    description='lotus spider',
     keywords='scrapy proxy user-agent web-scraping',
     license='New BSD License',
     author="Liang Tao",
@@ -18,9 +19,6 @@ setup(
         'Topic :: Internet :: WWW/HTTP',
     ],
     packages=[
-        'scrapy_fake_useragent',
-    ],
-    install_requires=[
-        'fake-useragent'
-    ],
+        'lotus_spider',
+    ]
 )
