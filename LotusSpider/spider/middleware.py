@@ -6,6 +6,7 @@ import os
 import random
 import re
 import base64
+from scrapy import signals
 
 logger = logging.getLogger(__name__)
 
@@ -36,8 +37,8 @@ class RandomUserAgentMiddleware(object):
             ua = random.choice(self.ua_list)
             request.headers.setdefault('User-Agent', ua)
         elif self.ua_type == 'per_user':
-            if 'user_id' in request.meta.keys():
-                ua = self.ua_list[request.meta['user_id']]
+            if 'user' in request.meta.keys():
+                ua = self.ua_list[request.meta['user']]
                 request.headers.setdefault('User-Agent', self.ua_list[request.meta['user_id']])
             else:
                 ua = self.user_agent
@@ -48,6 +49,22 @@ class RandomUserAgentMiddleware(object):
 class Mode:
     RANDOMIZE_PROXY_EVERY_REQUESTS, RANDOMIZE_PROXY_ONCE, SET_CUSTOM_PROXY = range(3)
 
+
+class CookieMiddleware(object):
+    def __init__(self, settings, crawler):
+        # 初始化cookies
+        # init_cookies()
+        pass
+
+    @classmethod
+    def from_crawler(cls, crawler):
+        return cls(crawler.settings)
+
+    def process_request(self, request, spider):
+        # get cookie
+        # request.cookie = cookie
+        # request.meta['account'] = account
+        pass
 
 class RandomProxy(object):
     def __init__(self, settings):
