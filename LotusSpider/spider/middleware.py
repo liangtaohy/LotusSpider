@@ -7,6 +7,8 @@ import random
 import re
 import base64
 from scrapy import signals
+from authcookies import *
+from scrapy.utils.python import to_native_str
 
 logger = logging.getLogger(__name__)
 
@@ -52,19 +54,73 @@ class Mode:
 
 class CookieMiddleware(object):
     def __init__(self, settings, crawler):
-        # 初始化cookies
-        # init_cookies()
-        pass
+        self.debug = settings.getbool('COOKIES_DEBUG', False)
+        self.enabled = settings.getbool('COOKIES_ENABLED', False)
+        if self.enabled:
+            init_cookie(crawler, settings.get('ACCOUNT_CONFIG'))
 
     @classmethod
     def from_crawler(cls, crawler):
-        return cls(crawler.settings)
+        return cls(crawler.settings, crawler)
 
     def process_request(self, request, spider):
-        # get cookie
-        # request.cookie = cookie
-        # request.meta['account'] = account
-        pass
+        print 'Cookiemiddleware.process_request', request.url
+        if self.enabled is True:
+            if 'auto_login' in request.meta.keys() and request.meta['auto_login'] is True:
+                cookie, account = try_get_random_cookie(spider=spider)
+                if cookie is not None:
+                    request.cookies = cookie
+                    request.meta['account'] = account
+            self._debug_cookie(request, spider)
+
+    def _debug_cookie(self, request, spider):
+        if self.debug:
+            cl = [to_native_str(c, errors='replace')
+                  for c in request.headers.getlist('Cookie')]
+            if cl:
+                cookies = "\n".join("Cookie: {}\n".format(c) for c in cl)
+                msg = "Sending cookies to: {}\n{}".format(request, cookies)
+                logger.debug(msg, extra={'spider': spider})
+
+
+class CookieBannedMiddleware(object):
+    def __init__(self, settings, crawler):
+        self.cookie_max_retry_times = settings.getint('COOKIE_RETRY_TIMES', default=2)
+        self.priority_adjust = settings.getint('COOKIE_RETRY_PRIORITY_ADJUST', default=-1)
+        self.enabled = settings.getbool('COOKIES_ENABLED', False)
+        self.debug = settings.getbool('COOKIES_DEBUG', False)
+
+    @classmethod
+    def from_crawler(cls, crawler):
+        return cls(crawler.settings, crawler)
+
+    def process_response(self, request, response, spider):
+        """
+        如果账号被封禁，则随机更换一个账号
+        :param request:
+        :param response:
+        :param spider:
+        :return:
+        """
+        print 'CookieBannedMiddleware.process_response', response.body
+        if self.enabled and hasattr(spider, 'account_banned'):
+            banned = spider.account_banned(response)
+            if banned is True:
+                retries = request.meta.get('cookie_retry_times', 0) + 1
+                account_banned(account=request.meta['account'], retry_times=retries, spider=spider)
+                max_retry_times = request.meta.get('cookie_max_retry_times', self.cookie_max_retry_times)
+                if retries < max_retry_times:
+                    cookie, _ = try_get_random_cookie(spider)
+                    if cookie is not None:
+                        retryreq = request.copy()
+                        retryreq.cookies = cookie
+                        retryreq.meta['cookie_retry_times'] = retries
+                        retryreq.dont_filter = True
+                        retryreq.priority = request.priority + self.priority_adjust
+                        return retryreq
+        else:
+            logger.debug("method account_banned is not defined, skip CookieBannedMiddleware")
+
 
 class RandomProxy(object):
     def __init__(self, settings):

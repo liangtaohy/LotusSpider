@@ -1,5 +1,5 @@
 #-*-coding:utf8-*-
-from setuptools import setup
+from setuptools import setup, find_packages, __version__ as setuptools_version
 
 setup(
     name='lotus-spider',
@@ -18,7 +18,5 @@ setup(
         'Programming Language :: Python',
         'Topic :: Internet :: WWW/HTTP',
     ],
-    packages=[
-        'lotus_spider',
-    ]
+    packages=find_packages(exclude=('captcha', 'captcha.*'))
 )
