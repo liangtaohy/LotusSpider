@@ -11,10 +11,11 @@ from twisted.web import client
 
 """
 """
-#SQUID_CONF_ORIGINAL = "/etc/squid/squid.conf.original"
-#SQUID_CONF = "/etc/squid/squid.conf"
-SQUID_CONF_ORIGINAL = "squid.conf.original"
-SQUID_CONF = "squid.conf"
+SQUID_CONF_ORIGINAL = "/etc/squid/squid.conf.original"
+SQUID_CONF = "/etc/squid/squid.conf"
+
+#SQUID_CONF_ORIGINAL = "squid.conf.original"
+#SQUID_CONF = "squid.conf"
 
 """
 配置config语句
@@ -156,4 +157,5 @@ if __name__ == '__main__':
             print availables
 
         addSquidConf(availables)
+        restartSquid()
         time.sleep(60)
