@@ -14,8 +14,8 @@ from twisted.web import client
 SQUID_CONF_ORIGINAL = "/etc/squid/squid.conf.original"
 SQUID_CONF = "/etc/squid/squid.conf"
 
-#SQUID_CONF_ORIGINAL = "squid.conf.original"
-#SQUID_CONF = "squid.conf"
+SQUID_CONF_ORIGINAL = "squid.conf.original"
+SQUID_CONF = "squid.conf"
 
 """
 配置config语句
@@ -122,6 +122,14 @@ def errback(failure):
 
 if __name__ == '__main__':
     while True:
+        import sys
+
+        del sys.modules['twisted.internet.reactor']
+        from twisted.internet import reactor
+        from twisted.internet import default
+
+        default.install()
+
         res = requests.get("http://www.89ip.cn/tqdl.html?api=1&num=500&port=&address=&isp=")
         proxies = []
 
@@ -152,7 +160,7 @@ if __name__ == '__main__':
                     deferred.addErrback(errback)
                     deferred_list.append(deferred)  # 把所有的请求加到列表里，后面要检测
             dlist = defer.DeferredList(deferred_list)  # 检测所有的请求
-            dlist.addBoth(all_done)  # 检测到所有请求都执行完，执行的方法
+            dlist.addBoth(lambda _: reactor.stop())  # 检测到所有请求都执行完，执行的方法
             reactor.run()
             print availables
 
