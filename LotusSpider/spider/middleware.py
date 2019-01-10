@@ -45,31 +45,43 @@ class RandomUserAgentMiddleware(object):
             else:
                 ua = self.user_agent
                 request.headers.setdefault('User-Agent', self.user_agent)
-        logger.log("set default User-Agent to " + ua, level='INFO')
+        logger.info("set default User-Agent to " + ua)
 
 
 class Mode:
-    RANDOMIZE_PROXY_EVERY_REQUESTS, RANDOMIZE_PROXY_ONCE, SET_CUSTOM_PROXY = range(3)
+    RANDOMIZE_PROXY_EVERY_REQUESTS, RANDOMIZE_PROXY_ONCE, SET_CUSTOM_PROXY, POLL_PROXY_EVERY_REQUESTS = range(4)
 
 
 class CookieMiddleware(object):
     def __init__(self, settings, crawler):
         self.debug = settings.getbool('COOKIES_DEBUG', False)
-        self.enabled = settings.getbool('COOKIES_ENABLED', False)
+        self.enabled = True
         if self.enabled:
-            init_cookie(crawler, settings.get('ACCOUNT_CONFIG'))
+            init_cookie(crawler.spider, settings.get('ACCOUNT_CONFIG'))
 
     @classmethod
     def from_crawler(cls, crawler):
         return cls(crawler.settings, crawler)
 
     def process_request(self, request, spider):
-        print 'Cookiemiddleware.process_request', request.url
+        print 'Cookiemiddleware.process_request', request.url, request.meta
         if self.enabled is True:
-            if 'auto_login' in request.meta.keys() and request.meta['auto_login'] is True:
-                cookie, account = try_get_random_cookie(spider=spider)
+            print request.meta
+            if 'auto_login' in request.meta and request.meta['auto_login'] is True:
+
+                if 'login_type' in request.meta and request.meta['login_type'] == 'random':
+                    cookie, account = try_get_random_cookie(spider=spider)
+                else:
+                    cookie, account = poll_cookie(spider=spider)
+
+                print 'get cookie', cookie
                 if cookie is not None:
-                    request.cookies = cookie
+                    # FIXME need to fix, not work
+                    #request.cookies = cookie
+                    s = ''
+                    for key in cookie:
+                        s = key + '=' + cookie[key] + ';'
+                    request.headers['Cookie'] = s
                     request.meta['account'] = account
             self._debug_cookie(request, spider)
 
@@ -85,7 +97,7 @@ class CookieMiddleware(object):
 
 class CookieBannedMiddleware(object):
     def __init__(self, settings, crawler):
-        self.cookie_max_retry_times = settings.getint('COOKIE_RETRY_TIMES', default=2)
+        self.cookie_max_retry_times = settings.getint('COOKIE_RETRY_TIMES', default=3)
         self.priority_adjust = settings.getint('COOKIE_RETRY_PRIORITY_ADJUST', default=-1)
         self.enabled = settings.getbool('COOKIES_ENABLED', False)
         self.debug = settings.getbool('COOKIES_DEBUG', False)
@@ -103,14 +115,17 @@ class CookieBannedMiddleware(object):
         :return:
         """
         print 'CookieBannedMiddleware.process_response', response.body
-        if self.enabled and hasattr(spider, 'account_banned'):
+        if self.enabled and hasattr(spider, 'account_banned') and 'auto_login' in request.meta:
             banned = spider.account_banned(response)
             if banned is True:
                 retries = request.meta.get('cookie_retry_times', 0) + 1
                 account_banned(account=request.meta['account'], retry_times=retries, spider=spider)
                 max_retry_times = request.meta.get('cookie_max_retry_times', self.cookie_max_retry_times)
                 if retries < max_retry_times:
-                    cookie, _ = try_get_random_cookie(spider)
+                    if 'login_type' in request.meta.keys() and request.meta['login_type'] == 'random':
+                        cookie, account = try_get_random_cookie(spider=spider)
+                    else:
+                        cookie, account = poll_cookie(spider=spider)
                     if cookie is not None:
                         retryreq = request.copy()
                         retryreq.cookies = cookie
@@ -120,6 +135,7 @@ class CookieBannedMiddleware(object):
                         return retryreq
         else:
             logger.debug("method account_banned is not defined, skip CookieBannedMiddleware")
+        return response
 
 
 class RandomProxy(object):
@@ -127,12 +143,14 @@ class RandomProxy(object):
         self.mode = settings.get('PROXY_MODE')
         self.proxy_list = settings.get('PROXY_LIST')
         self.chosen_proxy = ''
+        self.next_proxy_index = 0
+        self.proxy_size = 0
 
         if os.path.isfile(self.proxy_list_file):
             with open(self.proxy_list_file, 'r') as f:
                 self.proxies = json.load(f, encoding='utf-8')
 
-        if self.mode == Mode.RANDOMIZE_PROXY_EVERY_REQUESTS or self.mode == Mode.RANDOMIZE_PROXY_ONCE:
+        if self.mode == Mode.RANDOMIZE_PROXY_EVERY_REQUESTS or self.mode == Mode.RANDOMIZE_PROXY_ONCE or self.mode == Mode.POLL_PROXY_EVERY_REQUESTS:
             if self.proxy_list is None:
                 raise KeyError('PROXY_LIST setting is missing')
             self.proxies = {}
@@ -152,6 +170,7 @@ class RandomProxy(object):
                     self.proxies[parts.group(1) + parts.group(3)] = user_pass
             finally:
                 fin.close()
+            self.proxy_size = len(self.proxies)
             if self.mode == Mode.RANDOMIZE_PROXY_ONCE:
                 self.chosen_proxy = random.choice(list(self.proxies.keys()))
         elif self.mode == Mode.SET_CUSTOM_PROXY:
@@ -184,6 +203,9 @@ class RandomProxy(object):
 
         if self.mode == Mode.RANDOMIZE_PROXY_EVERY_REQUESTS:
             proxy_address = random.choice(list(self.proxies.keys()))
+        elif self.mode == Mode.POLL_PROXY_EVERY_REQUESTS:
+            self.next_proxy_index = (self.next_proxy_index + 1) % self.proxy_size
+            proxy_address = list(self.proxies.keys())[self.next_proxy_index]
         else:
             proxy_address = self.chosen_proxy
 

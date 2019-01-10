@@ -1,3 +1,4 @@
 requests
 scrapy
 opencv-python
+asyncio

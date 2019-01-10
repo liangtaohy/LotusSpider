@@ -30,13 +30,28 @@ LOGIN_FORMS_KEY = "%s:form:%s"
 ACCOUNT_BAN_KEY = "%s:account:ban:%s"
 
 
+def poll_cookie(spider):
+    global client
+    if not client.ping():
+        raise ValueError('redis down')
+
+    account = client.rpoplpush(USER_ACCOUNTS_QUEUE % (spider.name), USER_ACCOUNTS_QUEUE % (spider.name))
+    cookie = client.get("%s:cookies:%s" % (spider.name, account))
+    if cookie:
+        print 'poll cookie', cookie
+        return json.loads(cookie, encoding='utf-8'), account
+    return None, None
+
+
 def try_get_random_cookie(spider):
     """
     随机获取一个可用的cookie，如果没有，则返回None
     :param spider:
     :return: json | None
     """
+    global client
     keys = client.keys("%s:cookies:*" % (spider.name))
+    print 'cookies len: ', len(keys)
     if len(keys) > 0:
         elem = random.choice(keys)
         account = elem.split(":")[2]
@@ -83,6 +98,7 @@ def get_account_form(spider_name, account):
     :param account:
     :return:
     """
+    global client
     return client.get(LOGIN_FORMS_KEY % (spider_name, account))
 
 
@@ -94,9 +110,10 @@ def init_cookie(spider, config):
     :param config:
     :return:
     """
+    global client
     client = redis.Redis(host=config['host'], port=config['port'], db=config['db'], password=config['password'])
     spider_name = spider.name
-
+    print "init_cookie", spider.name, config
     accounts = client.lrange(USER_ACCOUNTS_QUEUE % (spider_name), 0, -1)
     for account in accounts:
         if account is not None or len(account) > 0:
@@ -110,12 +127,13 @@ def init_cookie(spider, config):
 
             if hasattr(spider, 'get_cookie'):
                 cookie = spider.get_cookie(spider=spider, payload=json.loads(login_form, encoding='utf8'))
-            else:
-                raise NotImplementedError
-            client.set(LOGIN_COOKIES_QUEUE % (spider_name, account), cookie)
+                while cookie is None:
+                    cookie = spider.get_cookie(spider=spider, payload=json.loads(login_form, encoding='utf8'))
+                client.set(LOGIN_COOKIES_QUEUE % (spider_name, account), cookie)
 
 
 def cookie_exists(account, spider):
+    global client
     if client.get(LOGIN_COOKIES_QUEUE % (spider.name, account)):
         return True
     else:
@@ -129,10 +147,11 @@ def update_cookie(account, spider):
     :param spider:
     :return:
     """
+    global client
     login_form = client.get(LOGIN_FORMS_KEY % (spider.name, account))
 
     if hasattr(spider, 'get_cookie'):
-        cookie = get_cookie(spider=spider, payload=json.loads(login_form, encoding='utf8'))
+        cookie = spider.get_cookie(spider=spider, payload=json.loads(login_form, encoding='utf8'))
     else:
         raise NotImplementedError
 
@@ -148,6 +167,7 @@ def account_banned(account, retry_times, spider):
     :param spider:
     :return:
     """
+    global client
     client.delete(LOGIN_COOKIES_QUEUE % (spider.name, account))
     client.incr(ACCOUNT_BAN_KEY % (spider.name, account))
     client.expire(ACCOUNT_BAN_KEY % (spider.name, account), retry_times * 60 * 10)
@@ -161,10 +181,36 @@ def remove_cookie(account, spider):
     :param spider:
     :return:
     """
+    global client
     client.delete(LOGIN_COOKIES_QUEUE % (spider.name, account))
 
 
+def set_gr_user_id():
+    import time
+    import random
+
+    gr_user_id_p = "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx"
+
+    t = int(time.time() * 1000)
+
+    def u(e, t):
+        r = int((t + 16 * random.random())) % 16 | 0
+        t = float(t / 16)
+        if "x" == e:
+            n = r
+        else:
+            n = 3 & r | 8
+        return "%x" % n, t
+
+    gr_user_id = []
+    for i in range(len(gr_user_id_p)):
+        n, t = u(gr_user_id_p[i], t)
+        gr_user_id.append(n)
+
+    print "".join(gr_user_id[0:8]) + "-" + "".join(gr_user_id[9:13]) + "-4" + "".join(gr_user_id[15:18]) + "-" + "".join(gr_user_id[19:])
+
 if __name__ == '__main__':
+    set_gr_user_id()
     UER_AGENT_LIST = [
         "Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.1 "
         "(KHTML, like Gecko) Chrome/22.0.1207.1 Safari/537.1",
@@ -208,34 +254,33 @@ if __name__ == '__main__':
     PROXY = "http://60.205.169.24:9988"
 
     class Spider(object):
-        name = 'test_spider'
+        name = 'lawsdata'
 
         def get_cookie(self, spider, payload):
+            print 'get_cookie'
             session = requests.Session()
             proxies = {
                 'http': PROXY,
             }
-
+            print 'try to get index'
             headers = {'user-agent': random.choice(UER_AGENT_LIST)}
 
-            r = session.get("http://www.lawsdata.com/", headers=headers, proxies=proxies)
-            if r.status_code == 200:
-                r = session.get("http://www.lawsdata.com/template/index/login-e51b5f65b6.html", headers=headers, proxies=proxies)
-                url = "http://www.lawsdata.com/login"
+            #session.proxies.update({'http': '60.205.169.24:9988'})
+            r = session.get("http://www.lawsdata.com/", headers=headers)
 
+            if r.status_code == 200:
+                print 'get login html begin'
+                r = session.get("http://www.lawsdata.com/template/index/login-e51b5f65b6.html", headers=headers)
+                print 'get login html end'
+                url = "http://www.lawsdata.com/login"
                 headers.update({
                     'X-Requested-With': 'XMLHttpRequest',
                     'referer': "http://www.lawsdata.com/template/index/login-e51b5f65b6.html"
                 })
+                print 'login ' + url
+                r = session.post(url, headers=headers, data=payload)
 
-                payload = {
-                    'mobile': '15102223207',
-                    'password': 'asdf1234',
-                    'rememberMe': 'false'
-                }
-
-                r = session.post(url, headers=headers, proxies=proxies, data=payload)
-
+                print r.content
                 if r.status_code == 200:
                     cookies = session.cookies.get_dict()
                     print 'login cookies:', cookies
@@ -261,11 +306,11 @@ if __name__ == '__main__':
     }
 
     client = redis.Redis(host=config['host'], port=config['port'], db=config['db'], password=config['password'])
+    """
     client.set(LOGIN_FORMS_KEY % (spider.name, account), json.dumps(login_form))
     client.lpush(USER_ACCOUNTS_QUEUE % (spider.name), account)
-
+    """
     init_cookie(spider=spider, config=config)
-    cookie, account = try_get_random_cookie(spider=spider)
-
-    print cookie
-    print account
+    for i in range(100):
+        cookie, account = try_get_random_cookie(spider=spider)
+        print cookie
