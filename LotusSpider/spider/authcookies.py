@@ -35,11 +35,53 @@ def poll_cookie(spider):
     if not client.ping():
         raise ValueError('redis down')
 
-    account = client.rpoplpush(USER_ACCOUNTS_QUEUE % (spider.name), USER_ACCOUNTS_QUEUE % (spider.name))
+    account = None
+    maxtries = 10
+    banned_times = 0
+    while maxtries > 0:
+        account = client.rpoplpush(USER_ACCOUNTS_QUEUE % (spider.name), USER_ACCOUNTS_QUEUE % (spider.name))
+        banned_times = client.get(ACCOUNT_BAN_KEY % (spider.name, account))
+        if banned_times is None:
+            break
+        maxtries -= 1
+
+    if banned_times is not None and maxtries <= 0:
+        raise ValueError('account banned:' + account)
+
     cookie = client.get("%s:cookies:%s" % (spider.name, account))
     if cookie:
-        print 'poll cookie', cookie
-        return json.loads(cookie, encoding='utf-8'), account
+        cookie = json.loads(cookie, encoding='utf-8')
+        if hasattr(spider, 'is_login'):
+            if not spider.is_login(cookie):
+                login_form = client.get(LOGIN_FORMS_KEY % (spider.name, account))
+                if hasattr(spider, 'get_cookie'):
+                    cookie = spider.get_cookie(spider=spider, payload=json.loads(login_form, encoding='utf8'))
+                    maxtries = 3
+                    while cookie is None and maxtries > 0:
+                        cookie = spider.get_cookie(spider=spider, payload=json.loads(login_form, encoding='utf8'))
+                        maxtries -= 1
+                    if cookie is None:
+                        account_banned(account=account, retry_times=3, spider=spider)
+                        raise ValueError('account banned:' + account)
+                    client.set(LOGIN_COOKIES_QUEUE % (spider.name, account), cookie)
+                    cookie = json.loads(cookie, encoding='utf-8')
+        return cookie, account
+    else:
+        login_form = client.get(LOGIN_FORMS_KEY % (spider.name, account))
+        if hasattr(spider, 'get_cookie'):
+            cookie = spider.get_cookie(spider=spider, payload=json.loads(login_form, encoding='utf8'))
+            maxtries = 3
+            while cookie is None and maxtries > 0:
+                cookie = spider.get_cookie(spider=spider, payload=json.loads(login_form, encoding='utf8'))
+                maxtries -= 1
+            if cookie is None:
+                account_banned(account=account, retry_times=3, spider=spider)
+                raise ValueError('account ban:' + account)
+
+            client.set(LOGIN_COOKIES_QUEUE % (spider.name, account), cookie)
+            cookie = json.loads(cookie, encoding='utf-8')
+
+        return cookie, account
     return None, None
 
 
@@ -114,6 +156,8 @@ def init_cookie(spider, config):
     client = redis.Redis(host=config['host'], port=config['port'], db=config['db'], password=config['password'])
     spider_name = spider.name
     print "init_cookie", spider.name, config
+    logger.debug("init_cookie enter")
+    logger.debug(json.dumps(config))
     accounts = client.lrange(USER_ACCOUNTS_QUEUE % (spider_name), 0, -1)
     for account in accounts:
         if account is not None or len(account) > 0:
@@ -265,7 +309,7 @@ if __name__ == '__main__':
             print 'try to get index'
             headers = {'user-agent': random.choice(UER_AGENT_LIST)}
 
-            #session.proxies.update({'http': '60.205.169.24:9988'})
+            session.proxies.update({'http': '60.205.169.24:9988'})
             r = session.get("http://www.lawsdata.com/", headers=headers)
 
             if r.status_code == 200:
