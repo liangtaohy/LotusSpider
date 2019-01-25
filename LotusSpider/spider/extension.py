@@ -1,3 +1,5 @@
+#-*-coding:utf8-*-
+
 """
 Scrapy extension for collecting scraping stats
 """
@@ -25,12 +27,12 @@ class RedisStatsCollector(object):
     def get_value(self, key, default=None, spider=None):
         spider_name = spider.name if spider else 'global'
         value = self.client.hget('stats:' + spider_name, key)
-        return value if value else default
+        return int(value) if value else default
 
     def get_stats(self, spider=None):
         try:
             spider_name = spider.name if spider else 'global'
-            _stats = json.loads(self.client.hgetall('stats:' + spider_name), encoding='utf-8')
+            _stats = self.client.hgetall('stats:' + spider_name)
             return _stats
         except:
             return {}
@@ -108,7 +110,7 @@ class SampleStats(object):
         self.response_status_count_prev = {'200':0}
 
         self.task = task.LoopingCall(self.log, spider)
-        self.task.start(self.interval)
+        self.task.start(self.interval, now=False)
 
     def log(self, spider):
         items = self.stats.get_value('item_scraped_count', 0)
@@ -141,3 +143,35 @@ class SampleStats(object):
     def spider_closed(self, spider, reason):
         if self.task and self.task.running:
             self.task.stop()
+
+
+if __name__ == '__main__':
+    class DummySettings:
+        settings = {}
+        def getbool(self, key):
+            return self.settings[key]
+
+        def get(self, key):
+            return self.settings[key]
+
+    class Crawler:
+        settings = DummySettings()
+
+    crawler = Crawler()
+    crawler.settings.settings = {
+        'STATS_DUMP': True,
+        'REDIS_CONFIG': {
+            'host': '127.0.0.1',
+            'port': 6379,
+            'password': 'foobared',
+            'db': 3
+        }
+    }
+
+    stats = RedisStatsCollector(crawler)
+    stats.set_value('download/request/count', 10)
+    print(stats.get_value('download/request/count', 20))
+    stats.inc_value('download/request/count', count=30)
+    print(stats.get_value('download/request/count', 20))
+    print(stats.get_stats())
+    print(pprint.pformat(stats.get_stats()))
