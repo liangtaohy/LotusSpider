@@ -145,10 +145,6 @@ class RandomProxy(object):
         self.next_proxy_index = 0
         self.proxy_size = 0
 
-        if os.path.isfile(self.proxy_list_file):
-            with open(self.proxy_list_file, 'r') as f:
-                self.proxies = json.load(f, encoding='utf-8')
-
         if self.mode == Mode.RANDOMIZE_PROXY_EVERY_REQUESTS or self.mode == Mode.RANDOMIZE_PROXY_ONCE or self.mode == Mode.POLL_PROXY_EVERY_REQUESTS or self.mode == Mode.STICKY_PROXY_EVERY_SESSION_ID:
             if self.proxy_list is None:
                 raise KeyError('PROXY_LIST setting is missing')
@@ -188,10 +184,11 @@ class RandomProxy(object):
             self.chosen_proxy = parts.group(1) + parts.group(3)
 
         if self.mode == Mode.STICKY_PROXY_EVERY_SESSION_ID:
-            config = settings.get('PROXY_STICKY_CONFIG', None)
-            if config is None:
-                raise KeyError('PROXY_STICKY_CONFIG config is missing')
-            self.client = redis.Redis(host=config['host'], port=config['port'], db=config['db'], password=config['password'])
+            config = settings.get('REDIS_CONFIG', None)
+            db = settings.get('PROXY_STICKY_DB', None)
+            if db is None or config is None:
+                raise KeyError('PROXY_STICKY_DB OR REDIS_CONFIG is missing')
+            self.client = redis.Redis(host=config['host'], port=config['port'], db=db, password=config['password'])
             self.sticky_time = config['STICKY_TIME']
 
     @classmethod
@@ -210,8 +207,9 @@ class RandomProxy(object):
         if self.mode == Mode.RANDOMIZE_PROXY_EVERY_REQUESTS:
             proxy_address = random.choice(list(self.proxies.keys()))
         elif self.mode == Mode.POLL_PROXY_EVERY_REQUESTS:
+            id = (self.next_proxy_index) % self.proxy_size
+            proxy_address = list(self.proxies.keys())[id]
             self.next_proxy_index = (self.next_proxy_index + 1) % self.proxy_size
-            proxy_address = list(self.proxies.keys())[self.next_proxy_index]
         elif self.mode == Mode.STICKY_PROXY_EVERY_SESSION_ID:  # session sticky
             """
             提供代理粘滞功能
@@ -233,6 +231,7 @@ class RandomProxy(object):
 
         proxy_user_pass = self.proxies[proxy_address]
 
+        logger.info("set proxy {0} with account {1}".format(proxy_address, request.meta['account'] if 'account' in request.meta else 'default'))
         request.meta['proxy'] = proxy_address
         if proxy_user_pass:
             basic_auth = 'Basic ' + base64.b64encode(proxy_user_pass.encode()).decode()

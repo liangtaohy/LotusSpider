@@ -113,15 +113,15 @@ class SampleStats(object):
         self.task.start(self.interval, now=False)
 
     def log(self, spider):
-        items = self.stats.get_value('item_scraped_count', 0)
-        pages = self.stats.get_value('response_received_count', 0)
+        items = self.stats.get_value('item_scraped_count', 0, spider=spider)
+        pages = self.stats.get_value('response_received_count', 0, spider=spider)
         irate = (items - self.itemsprev) * self.multiplier
         prate = (pages - self.pagesprev) * self.multiplier
         self.pagesprev, self.itemsprev = pages, items
 
-        requests = self.stats.get_value('downloader/request_count', 0, spider)
-        responses = self.stats.get_value('downloader/response_count', 0, spider) - self.response_count_prev
-        status_200 = self.stats.get_value('downloader/response_status_count/200', 0, spider) - self.response_status_count_prev['200']
+        requests = self.stats.get_value('downloader/request_count', 0, spider=spider)
+        responses = self.stats.get_value('downloader/response_count', 0, spider=spider)
+        status_200 = self.stats.get_value('downloader/response_status_count/200', 0, spider)
 
         req_rate = requests - self.request_count_prev
         res_rate = responses - self.response_count_prev

@@ -309,7 +309,7 @@ if __name__ == '__main__':
             print 'try to get index'
             headers = {'user-agent': random.choice(UER_AGENT_LIST)}
 
-            session.proxies.update({'http': '60.205.169.24:9988'})
+            #session.proxies.update({'http': '60.205.169.24:9988'})
             r = session.get("http://www.lawsdata.com/", headers=headers)
 
             if r.status_code == 200:

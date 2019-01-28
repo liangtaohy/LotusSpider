@@ -26,6 +26,8 @@ PEER_CONF = "cache_peer %s parent %s 0 no-query weighted-round-robin weight=%d c
 SPEED_TEST_URL = "https://www.baidu.com/img/bd_logo1.png?where=super"
 """
 
+stats = {}
+
 def restartSquid():
     # os.system('systemctl start squid')
     os.system('squid -k reconfigure')
@@ -48,7 +50,7 @@ def addSquidConf(proxys):
 
 class HttpStatusChecker(client.HTTPClientFactory):
     def __init__(self, url, proxy=None, headers=None, timeout=2):
-        client.HTTPClientFactory.__init__(self, url=url, headers=headers)
+        client.HTTPClientFactory.__init__(self, url=url, headers=headers, timeout=timeout)
         self.status = None
         self.header_time = None
         self.start_time = time.time()
@@ -120,50 +122,59 @@ def errback(failure):
     sys.stderr.write(str(failure))
 
 
+def fetchFreeProxy(num=500):
+    global availables
+    import sys
+
+    del sys.modules['twisted.internet.reactor']
+    from twisted.internet import reactor
+    from twisted.internet import default
+
+    default.install()
+
+    res = requests.get("http://www.89ip.cn/tqdl.html?api=1&num=%d&port=&address=&isp=" % (num))
+    proxies = []
+
+    # add new proxy into proxy list
+    for proxy in re.findall("([0-9\.:]{10,})", res.content):
+        proxies.append('http://' + proxy)
+
+    # merge old available proxy into proxy list
+    for item in availables:
+        proxies.append(item['proxy'])
+
+    # clean availables
+    availables = []
+
+    proxies = list(set(proxies))
+    r = requests.session()
+
+    url = "https://www.baidu.com/img/bd_logo1.png?where=super"
+
+    deferred_list = []
+    if True:
+        for proxy in proxies:
+            for i in range(0, 1):
+                deferred = checkStatus(url=url, proxy=proxy, timeout=10)
+                deferred.addCallback(callback)  # 请求返回后的回调函数
+                deferred.addErrback(errback)
+                deferred_list.append(deferred)  # 把所有的请求加到列表里，后面要检测
+        dlist = defer.DeferredList(deferred_list)  # 检测所有的请求
+        dlist.addBoth(lambda _: reactor.stop())  # 检测到所有请求都执行完，执行的方法
+        reactor.run()
+
+
+def stats_inc_value(key, value=1):
+    """
+    自增统计量
+    :param key:
+    :return:
+    """
+    global stats
+    stats[key] = stats[key] + value if key in stats else value
+
+
 if __name__ == '__main__':
-    while True:
-        import sys
-
-        del sys.modules['twisted.internet.reactor']
-        from twisted.internet import reactor
-        from twisted.internet import default
-
-        default.install()
-
-        res = requests.get("http://www.89ip.cn/tqdl.html?api=1&num=500&port=&address=&isp=")
-        proxies = []
-
-        # add new proxy into proxy list
-        for proxy in re.findall("([0-9\.:]{10,})", res.content):
-            proxies.append('http://' + proxy)
-
-        # merge old available proxy into proxy list
-        for item in availables:
-            proxies.append(item['proxy'])
-
-        # clean availables
-        availables = []
-
-        proxies = list(set(proxies))
-        r = requests.session()
-
-        tasks = []
-
-        url = "http://www.lawsdata.com/"
-
-        deferred_list = []
-        if True:
-            for proxy in proxies:
-                for i in range(0,1):
-                    deferred = checkStatus(url=url, proxy=proxy, timeout=10)
-                    deferred.addCallback(callback)  # 请求返回后的回调函数
-                    deferred.addErrback(errback)
-                    deferred_list.append(deferred)  # 把所有的请求加到列表里，后面要检测
-            dlist = defer.DeferredList(deferred_list)  # 检测所有的请求
-            dlist.addBoth(lambda _: reactor.stop())  # 检测到所有请求都执行完，执行的方法
-            reactor.run()
-            print availables
-
-        addSquidConf(availables)
-        restartSquid()
-        time.sleep(60)
+    import json
+    json.dump({'a':1}, open("", 'w'))
+    pass
